@@ -4,10 +4,10 @@ from pydantic import BaseModel, EmailStr
 from typing import Annotated, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from auth.jwt_handler import signJwt
+from auth.jwt_handler import signJwt, decodeJwt
 import models
 from database import SessionLocal, engine
-from  auth.bearer import jwtBearer
+from  auth.bearer import jwtBearer ,RoleChecker, user_access, writer_access, admin_access
 
 app = FastAPI()
 # models.Base.metadata.create_all(bind=engine)
@@ -50,6 +50,9 @@ class UserLogin(BaseModel):
             }
         }
 
+class UserRoleUpdate(BaseModel):
+    user_id: int
+    role: str
 
 def get_db():
     db = SessionLocal()
@@ -58,12 +61,17 @@ def get_db():
     finally:
         db.close()
 
+
 db_dependency = Annotated[Session, Depends(get_db)]
 
 @app.post("/users/signup",tags=["users"], status_code=status.HTTP_201_CREATED)
 async def create_user(user: UserCreate, db: db_dependency):
     try:
-        db_user = models.User(**user.dict())
+        db_user = models.User(
+            username=user.username,
+            email=user.email,
+            password=user.password,  
+            role=models.Role.USER)
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
@@ -78,7 +86,7 @@ async def login_user(user: UserLogin, db: db_dependency):
     db_user = db.query(models.User).filter(models.User.email == user.email, models.User.password == user.password).first()
     if not db_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    return signJwt(db_user.email)
+    return signJwt(db_user.email,db_user.role)
 
 @app.get("/users/{user_id}",  tags=["users"],status_code=status.HTTP_200_OK)
 async def get_user(user_id: int, db: db_dependency):
@@ -88,9 +96,18 @@ async def get_user(user_id: int, db: db_dependency):
     return user
 
 
-@app.post("/posts/", tags=["posts"],dependencies=[Depends(jwtBearer())], status_code=status.HTTP_201_CREATED)
-async def create_post(post: PostCreate, db: db_dependency):
+@app.post("/posts/", tags=["posts"], status_code=status.HTTP_201_CREATED)
+async def create_post(post: PostCreate, db: db_dependency,payload: dict = Depends(jwtBearer())):
+   
     try:
+
+        if payload["role"] != "admin":
+            user = db.query(models.User).filter(models.User.email == payload["userID"]).first()
+            if not user:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            if post.user_id != user.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot create post for another user")
+
         db_post = models.Post(**post.dict())
         db.add(db_post)
         db.commit()
@@ -100,7 +117,7 @@ async def create_post(post: PostCreate, db: db_dependency):
       
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user_id or database error")
 
-@app.get("/posts/{post_id}", tags=["posts"],status_code=status.HTTP_200_OK)
+@app.get("/posts/{post_id}", tags=["posts"], dependencies=[Depends(user_access)], status_code=status.HTTP_200_OK)
 async def read_post(post_id: int, db: db_dependency):
     post = db.query(models.Post).filter(models.Post.id == post_id).first()
     if not post:
@@ -134,3 +151,17 @@ async def update_post(post_id: int, post: PostUpdate, db: db_dependency):
     
 
     # python -m venv env    .\env\Scripts\activate   uvicorn main:app --reload   
+
+@app.put("/users/{user_id}/role", tags=["users"], dependencies=[Depends(admin_access)], status_code=status.HTTP_200_OK)
+async def update_user_role(user_id: int, role_update: UserRoleUpdate, db: db_dependency):
+    if role_update.role not in ["user", "writer", "admin"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role")
+    
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    
+    user.role = role_update.role
+    db.commit()
+    db.refresh(user)
+    return {"message": "User role updated successfully", "user_id": user.id, "role": user.role}

@@ -1,6 +1,12 @@
-from pydantic import EmailStr, Field
-from sqlalchemy import Boolean, Column, Integer, String
+
+import enum
+from sqlalchemy import Boolean, Column, Enum, Integer, String
 from database import Base
+
+class Role(str, enum.Enum):
+    USER = "user"
+    WRITER = "writer"
+    ADMIN = "admin"
 
 class User(Base):
     __tablename__="users"
@@ -9,6 +15,7 @@ class User(Base):
     username=Column(String(50),unique=True)
     email = Column(String(255), unique=True, nullable=True)
     password = Column(String(255), nullable=True) 
+    role=Column(Enum("user", "writer", "admin"),default=Role.USER, nullable=False)
    
 
 
@@ -19,3 +26,5 @@ class Post(Base):
     title = Column(String(50))
     content = Column(String(100))
     user_id = Column(Integer)
+
+

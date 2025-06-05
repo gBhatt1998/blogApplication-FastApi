@@ -2,6 +2,8 @@ import time
 import jwt
 from decouple import config
 
+from models import Role
+
 JWT_SECRET = config("secret")
 JWT_ALGORITHM = config("algorithm")
 
@@ -11,10 +13,11 @@ def token_response(token:str):
         "access_token":token
     }
 
-def signJwt(userID: str):
+def signJwt(userID: str, role:str):
     payload={
         "userID": userID,
-        "expiry":time.time()+500 
+        "role":role,
+        "expiry":time.time()+1000 
     }   
     token=jwt.encode(payload,JWT_SECRET,algorithm=JWT_ALGORITHM)
     return token_response(token)
