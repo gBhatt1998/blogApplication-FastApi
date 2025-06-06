@@ -96,7 +96,7 @@ async def get_user(user_id: int, db: db_dependency):
     return user
 
 
-@app.post("/posts/", tags=["posts"], status_code=status.HTTP_201_CREATED)
+@app.post("/posts/", tags=["posts"], dependencies=[Depends(writer_access)], status_code=status.HTTP_201_CREATED)
 async def create_post(post: PostCreate, db: db_dependency,payload: dict = Depends(jwtBearer())):
    
     try:
